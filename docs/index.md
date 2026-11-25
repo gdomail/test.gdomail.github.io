@@ -32,10 +32,9 @@ GdoMail を利用するには、メール配信サービス（Mailtrap）の準�
 ### ステップ 2：Google Apps Script（GAS）の設置
 
 1. [Google Apps Script](https://google.com) を開き、「新しいプロジェクト」を作成します。
-2. エディタに最初から入っているコードをすべて消し、以下の **GASサンプルコード** を貼り付けます。
-3. コード冒頭の設定エリアにある `AUTH_TOKEN` と `MAILTRAP_TOKEN` を、ご自身の任意のパスワードとステップ1で取得したトークンに書き換えます。
+2. エディタに最初から入っているコードをすべて消し、以下の **GASサンプルコード** を貼り付けて保存します。
 
-#### GAS サンプルコード（Mailtrap 連携版）
+#### GAS サンプルコード（Mailtrap 連携・スクリプトプロパティ版）
 
 ```javascript
 /**
@@ -48,175 +47,256 @@ GdoMail を利用するには、メール配信サービス（Mailtrap）の準�
  *    アクセスできるユーザーを「全員」にしてデプロイしてください。
  */
 
-// ================= ★設定エリア =================
-const CONFIG = {
-  // Chrome拡張機能側と一致させる任意の認証パスワード
-  AUTH_TOKEN: 'your-secret-password-here',
-
-  // Mailtrap の API Token（Live または Sandbox）
-  MAILTRAP_TOKEN: 'your-mailtrap-api-token-here',
-
-  // 送信モード（'live' = 本番送信 / 'sandbox' = テスト送信）
-  MODE: 'live',
-
-  // Sandboxモード時に使用する Inbox ID（MODE が 'sandbox' の場合のみ必須）
-  SANDBOX_INBOX_ID: ''
-};
-// ================================================
-
 function doPost(e) {
+  const props = PropertiesService.getScriptProperties();
+  const AUTH_TOKEN = props.getProperty('AUTH_TOKEN');
+  const API_URL = props.getProperty('API_URL');
+  const API_KEY = props.getProperty('API_KEY');
+
   try {
-    const params = JSON.parse(e.postData.contents);
+    const data = JSON.parse(e.postData.contents);
+    const expectedHash = AUTH_TOKEN ? sha256HexGAS(AUTH_TOKEN) : '';
+    const isAuthorized =
+      (data.authTokenHash && data.authTokenHash === expectedHash) ||
+      (data.authToken && data.authToken === AUTH_TOKEN);
 
-    // 1. 認証チェック
-    if (!params.authToken || params.authToken !== CONFIG.AUTH_TOKEN) {
-      return createJsonResponse({ status: 'error', message: '認証エラー: パスワードが一致しません。' });
+    if (!isAuthorized) {
+      return createJsonResponse({ error: 'Unauthorized' });
     }
 
-    // 2. パラメータ検証
-    if (!params.from || !params.to || !params.subject) {
-      return createJsonResponse({ status: 'error', message: '必須項目（差出人・宛先・件名）が不足しています。' });
+    const maxAttachmentMb = getMaxAttachmentMb(props);
+
+    // Chrome拡張機能用：設定値のみ取得
+    if (data.action === 'getConfig') {
+      return createJsonResponse({
+        success: true,
+        maxAttachmentMb: maxAttachmentMb
+      });
     }
 
-    // 3. Mailtrap API へ送信リクエスト
-    const sendResult = sendViaMailtrap(params);
-    if (!sendResult.success) {
-      return createJsonResponse({ status: 'error', message: '配信APIエラー: ' + sendResult.error });
+    // 送信元アドレス データ取得（設定値もあわせて返却）
+    if (data.action === 'getSenders') {
+      const raw = props.getProperty('SENDERS');
+      return createJsonResponse({
+        success: true,
+        senders: raw ? JSON.parse(raw) : [],
+        maxAttachmentMb: maxAttachmentMb
+      });
     }
 
-    // 4. Gmail「送信済み」トレイへ控えを保存（エラーが出ても送信自体は成功扱いとする）
-    try {
-      saveToGmailSent(params);
-    } catch (gmailErr) {
-      console.warn('Gmail送信済み保存スキップ:', gmailErr);
+    if (!API_URL || !API_KEY) {
+      return createJsonResponse({ error: 'API_URL または API_KEY がスクリプトプロパティに設定されていません' });
     }
 
-    return createJsonResponse({ status: 'success', message: '送信が完了しました。' });
+    // 添付ファイルサイズ上限チェック
+    validateAttachmentSize(data.attachments, maxAttachmentMb);
 
+    const requestSpec = buildProviderRequest(API_KEY, data);
+    const options = {
+      method: 'post',
+      headers: requestSpec.headers,
+      muteHttpExceptions: true
+    };
+
+    if (requestSpec.contentType) {
+      options.contentType = requestSpec.contentType;
+    }
+    options.payload = requestSpec.payload;
+
+    const response = UrlFetchApp.fetch(API_URL, options);
+    const statusCode = response.getResponseCode();
+    const result = response.getContentText() ? JSON.parse(response.getContentText()) : {};
+
+    if (statusCode >= 400) {
+      const errMsg = result.message || result.ErrorMessage || (Array.isArray(result.errors) ? result.errors.join(', ') : null) || 'API Error (' + statusCode + ')';
+      return createJsonResponse({ error: errMsg, details: result });
+    }
+
+    saveToGmailSent(data);
+    return createJsonResponse({ success: true});
   } catch (err) {
-    return createJsonResponse({ status: 'error', message: 'サーバーエラー: ' + err.toString() });
+    return createJsonResponse({ error: err.message });
   }
 }
 
 /**
- * Mailtrap API 送信処理
+ * スクリプトプロパティから添付上限（MB）を取得（デフォルト: 10）
  */
-function sendViaMailtrap(params) {
-  const endpoint = (CONFIG.MODE === 'sandbox')
-    ? `https://mailtrap.io{CONFIG.SANDBOX_INBOX_ID}`
-    : 'https://mailtrap.io';
+function getMaxAttachmentMb(props) {
+  const raw = props.getProperty('MAX_ATTACHMENT_MB');
+  const parsed = Number(raw);
+  return (raw && !isNaN(parsed) && parsed > 0) ? parsed : 10;
+}
+
+/**
+ * 添付ファイルの合計サイズ検証（Base64長から元のバイト数を算出）
+ */
+function validateAttachmentSize(attachments, maxMb) {
+  if (!attachments || attachments.length === 0) return;
+
+  const maxBytes = maxMb * 1024 * 1024;
+  let totalBytes = 0;
+
+  attachments.forEach(function(att) {
+    if (!att.base64) return;
+    const padding = (att.base64.endsWith('==')) ? 2 : (att.base64.endsWith('=') ? 1 : 0);
+    const bytes = (att.base64.length * 3) / 4 - padding;
+    totalBytes += bytes;
+  });
+
+  if (totalBytes > maxBytes) {
+    const totalMb = (totalBytes / (1024 * 1024)).toFixed(2);
+    throw new Error('添付ファイルの合計サイズが上限（' + maxMb + 'MB）を超えています。（現在: ' + totalMb + 'MB）');
+  }
+}
+
+/**
+ * APIリクエスト（HTML / プレーンテキスト / 添付ファイル対応版）
+ */
+function buildProviderRequest(apiKey, data) {
+  const toList = data.to || [];
+  const ccList = data.cc || [];
+  const bccList = data.bcc || [];
+  const subject = data.subject || '(件名なし)';
+  const isPlain = Boolean(data.isPlainText);
+  const html = data.htmlContent || '';
+  const text = data.textContent || '';
+  const senderName = data.senderName || data.senderEmail;
+  const attachments = data.attachments || []; // [{ name, type, base64 }]
 
   const payload = {
-    from: {
-      email: params.from,
-      name: params.fromName || ''
-    },
-    to: parseRecipients(params.to),
-    subject: params.subject
+    from: { email: data.senderEmail, name: senderName },
+    to: toList.map(function(e) { return { email: e }; }),
+    subject: subject
   };
-
-  if (params.cc) payload.cc = parseRecipients(params.cc);
-  if (params.bcc) payload.bcc = parseRecipients(params.bcc);
-
-  if (params.isHtml) {
-    payload.html = params.body;
-    payload.text = stripHtml(params.body);
-  } else {
-    payload.text = params.body;
+  if (isPlain) { payload.text = text; } else { payload.html = html; }
+  if (ccList.length > 0) payload.cc = ccList.map(function(e) { return { email: e }; });
+  if (bccList.length > 0) payload.bcc = bccList.map(function(e) { return { email: e }; });
+  if (attachments.length > 0) {
+    payload.attachments = attachments.map(function(att) {
+      return { content: att.base64, filename: att.name, type: att.type || 'application/octet-stream', disposition: 'attachment' };
+    });
   }
-
-  if (params.attachments && params.attachments.length > 0) {
-    payload.attachments = params.attachments.map(att => ({
-      content: att.data,
-      filename: att.name,
-      type: att.mimeType || 'application/octet-stream',
-      disposition: 'attachment'
-    }));
-  }
-
-  const options = {
-    method: 'post',
+  return {
     contentType: 'application/json',
-    headers: {
-      'Authorization': 'Bearer ' + CONFIG.MAILTRAP_TOKEN
-    },
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
+    headers: { 'Authorization': 'Bearer ' + apiKey },
+    payload: JSON.stringify(payload)
   };
-
-  const response = UrlFetchApp.fetch(endpoint, options);
-  const code = response.getResponseCode();
-  const body = response.getContentText();
-
-  if (code >= 200 && code < 300) {
-    return { success: true };
-  } else {
-    return { success: false, error: `HTTP ${code}: ${body}` };
-  }
 }
 
 /**
- * Gmail API を使用して「送信済み」ラベル付きで保存
+ * Gmail 送信データ インポート（HTML / プレーンテキスト / 添付ファイル対応版）
  */
-function saveToGmailSent(params) {
-  const boundary = '----=_Part_' + new Date().getTime();
-  let rawLines = [
-    `From: ${params.fromName ? `"params.fromName" <{params.from}>` : params.from}`,
-    `To: ${params.to}`,
-    params.cc ? `Cc: ${params.cc}` : '',
-    `Subject: =?UTF-8?B?${Utilities.base64Encode(params.subject, Utilities.Charset.UTF_8)}?=`,
-    'MIME-Version: 1.0',
-    `Content-Type: multipart/mixed; boundary="${boundary}"`,
-    '',
-    `--${boundary}`,
-    params.isHtml
-      ? 'Content-Type: text/html; charset=UTF-8'
-      : 'Content-Type: text/plain; charset=UTF-8',
-    'Content-Transfer-Encoding: base64',
-    '',
-    Utilities.base64Encode(params.body || '', Utilities.Charset.UTF_8)
-  ].filter(line => line !== '');
+function saveToGmailSent(data) {
+  const fromHeader = data.senderName
+    ? '=?UTF-8?B?' + Utilities.base64Encode(data.senderName, Utilities.Charset.UTF_8) + '?= <' + data.senderEmail + '>'
+    : data.senderEmail;
 
-  if (params.attachments && params.attachments.length > 0) {
-    params.attachments.forEach(att => {
-      rawLines.push(
-        `--${boundary}`,
-        `Content-Type: ${att.mimeType || 'application/octet-stream'}; name="${att.name}"`,
-        'Content-Transfer-Encoding: base64',
-        `Content-Disposition: attachment; filename="${att.name}"`,
-        '',
-        att.data
-      );
-    });
+  const subjectHeader = '=?UTF-8?B?' + Utilities.base64Encode(data.subject || '(件名なし)', Utilities.Charset.UTF_8) + '?=';
+  const attachments = data.attachments || [];
+  const isPlain = Boolean(data.isPlainText);
+  const bodyContentType = isPlain ? 'text/plain; charset=UTF-8' : 'text/html; charset=UTF-8';
+  const bodyRawText = isPlain ? (data.textContent || '') : (data.htmlContent || '');
+  const encodedBody = Utilities.base64Encode(bodyRawText, Utilities.Charset.UTF_8);
+
+  const lines = [
+    'From: ' + fromHeader,
+    'To: ' + data.to.join(', '),
+  ];
+
+  if (data.cc && data.cc.length > 0) {
+    lines.push('Cc: ' + data.cc.join(', '));
+  }
+  if (data.bcc && data.bcc.length > 0) {
+    lines.push('Bcc: ' + data.bcc.join(', '));
   }
 
-  rawLines.push(`--${boundary}--`);
-  const rawEmail = rawLines.join(\('\r\\)n');
-  const encodedEmail = Utilities.base64EncodeWebSafe(rawEmail);
+  lines.push('Subject: ' + subjectHeader);
+  lines.push('MIME-Version: 1.0');
 
-  Gmail.Users.Messages.insert({
-    raw: encodedEmail,
-    labelIds: ['SENT']
-  }, 'me');
+  if (attachments.length === 0) {
+    // 添付ファイルがない場合
+    lines.push('Content-Type: ' + bodyContentType);
+    lines.push('Content-Transfer-Encoding: base64');
+    lines.push('');
+    lines.push(encodedBody);
+  } else {
+    // 添付ファイルがある場合（multipart/mixed）
+    const boundary = '----=_Part_' + Utilities.getUuid();
+    lines.push('Content-Type: multipart/mixed; boundary="' + boundary + '"');
+    lines.push('');
+
+    // 1. 本文パート（text/plain または text/html）
+    lines.push('--' + boundary);
+    lines.push('Content-Type: ' + bodyContentType);
+    lines.push('Content-Transfer-Encoding: base64');
+    lines.push('');
+    lines.push(encodedBody);
+    lines.push('');
+
+    // 2. 添付ファイルパート
+    attachments.forEach(function(att) {
+      const encodedFileName = '=?UTF-8?B?' + Utilities.base64Encode(att.name, Utilities.Charset.UTF_8) + '?=';
+      const contentType = att.type || 'application/octet-stream';
+      const foldedBase64 = att.base64.replace(/.{1,76}/g, '$&\r\n').trim();
+
+      lines.push('--' + boundary);
+      lines.push('Content-Type: ' + contentType + '; name="' + encodedFileName + '"');
+      lines.push('Content-Disposition: attachment; filename="' + encodedFileName + '"');
+      lines.push('Content-Transfer-Encoding: base64');
+      lines.push('');
+      lines.push(foldedBase64);
+      lines.push('');
+    });
+
+    lines.push('--' + boundary + '--');
+  }
+
+  const rawMime = lines.join('\r\n');
+  const encodedMessage = Utilities.base64EncodeWebSafe(rawMime);
+
+  Gmail.Users.Messages.insert(
+    {
+      raw: encodedMessage,
+      labelIds: ['SENT']
+    },
+    'me'
+  );
 }
 
-function parseRecipients(str) {
-  return str.split(',')
-    .map(s => s.trim())
-    .filter(s => s.length > 0)
-    .map(email => ({ email: email }));
-}
-
-function stripHtml(html) {
-  return (html || '').replace(/<[^>]*>?/gm, '');
-}
-
+/**
+ * オブジェクト(配列)をJSON形式の文字列に変換
+ */
 function createJsonResponse(obj) {
-  return ContentService
-    .createTextOutput(JSON.stringify(obj))
+  return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
+
+/**
+ * ハッシュ照合
+ */
+function sha256HexGAS(text) {
+  const rawHash = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, text, Utilities.Charset.UTF_8);
+  return rawHash.map(function(byte) {
+    const v = (byte < 0) ? byte + 256 : byte;
+    return ('0' + v.toString(16)).slice(-2);
+  }).join('');
+}
 ```
+
+#### スクリプト プロパティの設定
+APIトークンやパスワードをコード内に直接書かず安全に管理するため、GASの「プロジェクトの設定」から以下のプロパティを登録します。
+
+1. GASエディタ左側の歯車アイコン **「プロジェクトの設定」** をクリックします。
+2. 画面一番下の **「スクリプト プロパティ」＞「スクリプト プロパティを追加」** から、以下の5項目を設定して保存します。
+
+| プロパティ名 | 設定する値（例） | 説明 |
+| :--- | :--- | :--- |
+| `AUTH_TOKEN` | `my-secret-password-123` | Chrome拡張機能側と一致させる任意の認証パスワード |
+| `MAILTRAP_API_TOKEN` | `a1b2c3d4e5f6...` | Mailtrap で発行した API Token（Live または Sandbox） |
+| `MAILTRAP_SANDBOX_INBOX_ID` | `1234567`（本番時は空欄または未設定） | Sandbox（テスト送信）を使う場合のみ Inbox ID を入力 |
+| `MAX_ATTACHMENT_MB` | `10` | 添付ファイル合計サイズの上限（MB単位・未設定時はデフォルト値） |
+| `SENDERS` | `[{"email":"info@example.com","name":"株式会社〇〇"}]` | 送信を許可する差出人リスト（JSON配列形式） |
 
 #### GAS の有効化とデプロイ手順
 1. GASエディタ左側の **「サービス（＋）」** をクリックし、一覧から **「Gmail API」** を選択して「追加」を押します。
