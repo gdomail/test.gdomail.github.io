@@ -215,18 +215,15 @@ function saveToGmailSent(data) {
   lines.push('MIME-Version: 1.0');
 
   if (attachments.length === 0) {
-    // 添付ファイルがない場合
     lines.push('Content-Type: ' + bodyContentType);
     lines.push('Content-Transfer-Encoding: base64');
     lines.push('');
     lines.push(encodedBody);
   } else {
-    // 添付ファイルがある場合（multipart/mixed）
     const boundary = '----=_Part_' + Utilities.getUuid();
     lines.push('Content-Type: multipart/mixed; boundary="' + boundary + '"');
     lines.push('');
 
-    // 1. 本文パート（text/plain または text/html）
     lines.push('--' + boundary);
     lines.push('Content-Type: ' + bodyContentType);
     lines.push('Content-Transfer-Encoding: base64');
@@ -234,7 +231,6 @@ function saveToGmailSent(data) {
     lines.push(encodedBody);
     lines.push('');
 
-    // 2. 添付ファイルパート
     attachments.forEach(function(att) {
       const encodedFileName = '=?UTF-8?B?' + Utilities.base64Encode(att.name, Utilities.Charset.UTF_8) + '?=';
       const contentType = att.type || 'application/octet-stream';
@@ -309,3 +305,21 @@ APIトークンやパスワードをコード内に直接書かず安全に管�
 
 ---
 
+### ステップ 3：Chrome 拡張機能「GdoMail」の設定
+
+1. Chrome ウェブストアから **GdoMail** をインストールします。
+2. Chrome ツールバーの拡張機能アイコンから GdoMail の **「オプション（設定画面）」** を開きます。
+3. 以下の項目を入力して保存します。
+   * **GAS ウェブアプリ URL**: ステップ2で発行した URL
+   * **認証パスワード**: スクリプトプロパティに設定した `AUTH_TOKEN` と同じ文字列
+   * **差出人（From）リスト**: 送信に使う独自ドメインのメールアドレスと表示名
+4. Gmail を開き、「作成」ボタンを押すと表示される GdoMail パネルから送信をお試しください。
+
+---
+
+## サポート・お問い合わせ
+
+不具合の報告やご質問は、Chrome ウェブストアのサポートタブ、または下記連絡先までお問い合わせください。
+
+* **開発者**: （※ここにデベロッパー名を入力）
+* **連絡先**: （※ここにサポート用メールアドレスを入力）
