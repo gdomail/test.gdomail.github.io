@@ -293,7 +293,7 @@ APIトークンやパスワードをコード内に直接書かず安全に管�
 | プロパティ名 | 必須/任意 | 設定する値（例） | 説明 |
 | :--- | :--- | :--- | :--- |
 | `AUTH_TOKEN` | **必須** | `my-secret-password-123` | Chrome拡張機能側と一致させる任意の認証パスワード |
-| `API_URL` | **必須** | `https://mailtrap.io` | 本番送信用のURL（※Sandboxテスト時は `https://mailtrap.io{INBOX_ID}`） |
+| `API_URL` | **必須** | `https://send.api.mailtrap.io/api/send` | 本番送信用のURL<br><br>※Sandboxテスト時は下記<br> `https://sandbox.api.mailtrap.io/api/send/{INBOX_ID}` |
 | `API_KEY` | **必須** | `a1b2c3d4e5f6...` | Mailtrap で発行した API Token |
 | `MAX_ATTACHMENT_MB` | 任意 | `10` | 添付ファイル合計サイズの上限（MB単位・未設定時はデフォルト `10`） |
 | `SENDERS` | 任意 | `[{"email":"info@example.com","name":"表示名"}]` | 拡張機能側へ自動取得させる差出人リスト（JSON配列形式） |
