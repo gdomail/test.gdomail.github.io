@@ -4,8 +4,7 @@
 
 標準の Google Apps Script（GAS）だけでなく、本仕様に準拠した JSON レスポンスを返す仕組みを実装すれば、**Cloudflare Workers** や任意のサーバーレス環境・独自サーバーでもバックエンドとして動作させることができます。
 
-> [!IMPORTANT]
-> <mark>※ 現在は Google Apps Script（GAS）に対応しています（Cloudflare Workers 等は今後のアップデートで対応予定）</mark>
+<mark>※ 現在は Google Apps Script（GAS）に対応しています（Cloudflare Workers 等は今後のアップデートで対応予定）</mark>
 
 * [← トップページ（導入手順・GASサンプルコード）へ戻る](./index.html)
 * [プライバシーポリシー](./privacy.html)
