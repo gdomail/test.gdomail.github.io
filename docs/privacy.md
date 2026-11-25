@@ -47,6 +47,8 @@
 
 本拡張機能による情報の利用および転送は、[Chrome ウェブストア デベロッパー プログラム ポリシー](https://chrome.com)（限定使用の要件を含む）に完全に準拠しています。取得したデータは、ユーザーが本拡張機能の主要機能（Gmail からの独自ドメインメール送信）を利用する目的にのみ使用されます。
 
+* [Chrome ウェブストア デベロッパー プログラム ポリシー（日本語案内ページ）](https://transparency.google/intl/ja_ALL/our-policies/product-terms/google-chrome)
+
 ---
 
 ## 5. セキュリティ対策
