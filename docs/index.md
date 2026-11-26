@@ -13,6 +13,7 @@
 > 
 > 本拡張機能は現在 Google Apps Script（GAS）にのみ対応しています。
 > Cloudflare Workers 等の他環境への対応は今後のアップデートで予定しています。
+<br>
 
 ---
 
