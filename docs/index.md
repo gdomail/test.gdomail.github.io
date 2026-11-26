@@ -4,11 +4,15 @@
 
 ユーザー自身が管理する Google Apps Script（GAS）や Cloudflare Workers などのバックエンドを経由し、外部メール配信API（Mailtrap 等）と連携して動作します。
 
-<mark>※ 現在は Google Apps Script（GAS）に対応しています（Cloudflare Workers 等は今後のアップデートで対応予定）</mark>
-
 * **[バックエンド連携仕様書（JSONプロトコル）](./spec.html)** — 独自バックエンド（Cloudflare Workers 等）を構築する方向けの技術仕様
 * **[プライバシーポリシー](./privacy.html)** — データの取り扱いとセキュリティについて
 
+<br>
+
+> ⚠️ **重要（Important）**
+> 
+> 本拡張機能は現在 Google Apps Script（GAS）にのみ対応しています。
+> Cloudflare Workers 等の他環境への対応は今後のアップデートで予定しています。
 ---
 
 ## 主な特徴
