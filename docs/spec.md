@@ -7,6 +7,8 @@
 * [← トップページ（導入手順・GASサンプルコード）へ戻る](./index.html)
 * [プライバシーポリシー](./privacy.html)
 
+<br>
+
 > ⚠️ **重要（Important）**
 > 
 > 本拡張機能は現在 Google Apps Script（GAS）にのみ対応しています。
