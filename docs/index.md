@@ -26,7 +26,14 @@
 
 ## 導入手順（全3ステップ）
 
-GdoMail を利用するには、メール配信サービス（Mailtrap）の準備と、中継役となる Google Apps Script（GAS）の設置が必要です。
+GdoMail を利用するには、メール配信サービスの準備と、中継役となるバックエンドの設置が必要です。
+<br><br>
+ここでは下記２つのサービス（無料）を利用する方法を説明しています。
+<br>
+<mark>※ その他の方法でシステムを独自に構築することも可能です。</mark>
+
+* メール配信サービスは、 Mailtrap
+* バックエンドサービスは、Google Apps Script（GAS）
 
 ### ステップ 1：Mailtrap の準備
 1. [Mailtrap](https://mailtrap.io) にアカウント登録・ログインします。
